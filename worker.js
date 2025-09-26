@@ -19,6 +19,28 @@ export default {
       return new Response("OK", { status: 200 });
     }
 
+    // ✅ Handle Pendaftaran (proxy ke backend)
+    if (url.pathname === "/register" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const apiResponse = await fetch(`${API_BASE_URL}/statscf`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await apiResponse.json();
+        return new Response(JSON.stringify(data), {
+          status: apiResponse.status,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ success: false, error: err.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     // 👇 Endpoint test proxy (dipanggil dari form dashboard)
     if (url.pathname === "/test" && url.searchParams.has("proxy")) {
       const proxy = url.searchParams.get("proxy");
@@ -29,7 +51,8 @@ export default {
     }
 
     // 👇 Tampilkan dashboard
-    const stats = await fetchStats();
+    const urlId = url.searchParams.get('id');
+    const stats = await fetchStats(urlId);
     const workerStats = stats.worker_stats || {};
     const zoneStats = stats.zone_stats || {};
 
@@ -54,14 +77,18 @@ export default {
     .stat-value.error { color: var(--error-text); }
     .status-dot { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: #dc3545; vertical-align: middle; margin-left: 8px; }
     .status-dot.up { background: #28a745; }
-    form { text-align: center; margin: 30px 0; }
-    input { padding: 14px; width: 300px; border: 2px solid #ddd; border-radius: 12px; font-size: 16px; background: var(--bg); color: var(--text); }
+    form { display: flex; flex-direction: column; align-items: center; gap: 15px; margin: 30px 0; }
+    input { padding: 14px; width: 80%; max-width: 450px; border: 2px solid #ddd; border-radius: 12px; font-size: 16px; background: var(--bg); color: var(--text); }
     .dark input { border-color: #444; }
     button { padding: 14px 28px; background: #28a745; color: white; border: none; border-radius: 12px; font-size: 16px; cursor: pointer; transition: background 0.2s; }
     button:hover { background: #218838; }
-    #result { margin-top: 24px; padding: 24px; background: var(--bg); border-radius: 12px; display: none; font-family: monospace; white-space: pre-wrap; border: 1px solid #ddd; }
-    .dark #result { border-color: #444; }
+    #testForm { flex-direction: row; justify-content: center; gap: 10px; }
+    #testForm input { width: 300px; }
+    .result-box { margin-top: 24px; padding: 24px; background: var(--bg); border-radius: 12px; display: none; font-family: monospace; white-space: pre-wrap; border: 1px solid #ddd; word-wrap: break-word; }
+    .dark .result-box { border-color: #444; }
     .success { color: #28a745; }
+    hr { border: none; border-top: 1px solid #ddd; margin: 40px 0; }
+    .dark hr { border-color: #444; }
     .footer { text-align: center; margin-top: 40px; font-size: 14px; color: var(--text); }
     #themeToggle { position: fixed; top: 20px; right: 20px; background: var(--card); border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; cursor: pointer; box-shadow: 0 2px 8px var(--shadow); }
   </style>
@@ -72,7 +99,7 @@ export default {
     <h1>🚀 Vortex-API Health Dashboard</h1>
 
     <div class="stats-grid">
-      <div class="stat">
+       <div class="stat">
         <div class="stat-title">API Status</div>
         <div class="stat-value">${stats.service}<span class="status-dot ${stats.service === "Online" ? "up" : ""}"></span></div>
       </div>
@@ -98,12 +125,35 @@ export default {
       </div>
     </div>
 
+    <hr>
+
+    <h2>View Stats by ID</h2>
+    <form id="viewStatsForm">
+        <input type="text" id="uniqueIdInput" placeholder="Enter Unique ID to view stats" required>
+        <button type="submit">Load Stats</button>
+    </form>
+
+    <hr>
+
+    <h2>Proxy Health Check</h2>
     <form id="testForm">
       <input type="text" id="proxyInput" placeholder="Contoh: 1.1.1.1:80" required>
       <button type="submit">CHECK PROXY</button>
     </form>
+    <div id="result" class="result-box"></div>
 
-    <div id="result"></div>
+    <hr>
+
+    <h2>Register New Account</h2>
+    <form id="registerForm">
+      <input type="password" id="apiTokenInput" placeholder="Cloudflare API Token" required>
+      <input type="text" id="accountIdInput" placeholder="Cloudflare Account ID" required>
+      <input type="text" id="zoneIdInput" placeholder="Zone ID (Optional, for bandwidth)">
+      <input type="text" id="workerNameInput" placeholder="Worker Name (Optional, for worker stats)">
+      <input type="number" id="errorThresholdInput" placeholder="Error Threshold (e.g., 100)">
+      <button type="submit">Register Account</button>
+    </form>
+    <div id="registrationResult" class="result-box"></div>
 
     <div class="footer">
       Data provided by Vortex-API. Auto-refresh in 30s.
@@ -165,8 +215,55 @@ export default {
       }
     });
 
+    // Registration Form
+    const registerForm = document.getElementById('registerForm');
+    const registrationResultDiv = document.getElementById('registrationResult');
+    registerForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      registrationResultDiv.style.display = 'block';
+      registrationResultDiv.innerHTML = '⏳ Registering...';
+
+      const body = {
+        cf_api_token: document.getElementById('apiTokenInput').value.trim(),
+        cf_account_id: document.getElementById('accountIdInput').value.trim(),
+        cf_zone_id: document.getElementById('zoneIdInput').value.trim() || undefined,
+        cf_worker_name: document.getElementById('workerNameInput').value.trim() || undefined,
+        error_threshold: parseInt(document.getElementById('errorThresholdInput').value, 10) || undefined,
+      };
+
+      try {
+        const res = await fetch('/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          registrationResultDiv.innerHTML = \`✅ <span class="success">Registration successful!</span><br>Your Unique ID is: <strong>\${data.unique_id}</strong>\`;
+        } else {
+          registrationResultDiv.innerHTML = \`❌ <span class="error">Registration Failed:</span> \${data.error || 'Unknown error'}\`;
+        }
+      } catch (err) {
+        registrationResultDiv.innerHTML = \`❌ <span class="error">Request failed: \${err.message}</span>\`;
+      }
+    });
+
+    // View Stats by ID Form
+    const viewStatsForm = document.getElementById('viewStatsForm');
+    viewStatsForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const uniqueId = document.getElementById('uniqueIdInput').value.trim();
+      if (uniqueId) {
+        window.location.href = '/?id=' + uniqueId;
+      }
+    });
+
     // Auto refresh
-    setTimeout(() => location.reload(), 30000);
+    setTimeout(() => {
+        if (!window.location.search.includes('id=')) {
+            location.reload();
+        }
+    }, 30000);
   </script>
 </body>
 </html>
@@ -332,7 +429,9 @@ _Request manual via /stats_
 }
 
 // ✅ Fungsi utama: Ambil statistik dari backend Vortex-API
-async function fetchStats() {
+async function fetchStats(uniqueId = null) {
+  const statsId = uniqueId || CF_STATS_UNIQUE_ID;
+
   try {
     // 1. Cek status layanan dengan endpoint /ping
     const pingRes = await fetch(`${API_BASE_URL}/ping`);
@@ -343,7 +442,7 @@ async function fetchStats() {
     const pingData = await pingRes.json();
 
     // 2. Ambil statistik detail dari endpoint /statscf
-    const statsRes = await fetch(`${API_BASE_URL}/statscf/data/${CF_STATS_UNIQUE_ID}`);
+    const statsRes = await fetch(`${API_BASE_URL}/statscf/data/${statsId}`);
     if (!statsRes.ok) {
       // Jika stats gagal tapi ping berhasil, layanan online tapi ada masalah data
       return { service: "Online (Data Error)", uptime_seconds: pingData.uptime_seconds || 0, worker_stats: null, zone_stats: null };
