@@ -186,7 +186,7 @@ export default {
 };
 
 // ✅ Fungsi: format uptime untuk Telegram → "Xd Yh Zm"
-function formatUptimeForTelegram(totalSeconds) {
+export function formatUptimeForTelegram(totalSeconds) {
   const days = Math.floor(totalSeconds / (24 * 3600));
   const hours = Math.floor((totalSeconds % (24 * 3600)) / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);

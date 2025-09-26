@@ -1,0 +1,16 @@
+{
+  "name": "cloudflare-worker-test",
+  "version": "1.0.0",
+  "description": "Tests for cloudflare worker",
+  "main": "worker.js",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "msw": "^2.11.3",
+    "vitest": "^3.2.4"
+  }
+}
