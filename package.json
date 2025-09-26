@@ -10,7 +10,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "msw": "^2.11.3",
-    "vitest": "^3.2.4"
+    "msw": "^2.0.0",
+    "vitest": "^0.34.6"
   }
 }

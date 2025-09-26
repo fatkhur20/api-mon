@@ -93,7 +93,7 @@ export default {
     #themeToggle { position: fixed; top: 20px; right: 20px; background: var(--card); border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; cursor: pointer; box-shadow: 0 2px 8px var(--shadow); }
   </style>
 </head>
-<body>
+<body data-uptime-seconds="${stats.uptime_seconds || 0}">
   <button id="themeToggle">🌙</button>
   <div class="container">
     <h1>🚀 Vortex-API Health Dashboard</h1>
@@ -161,109 +161,115 @@ export default {
   </div>
 
   <script>
-    // Dark Mode Toggle
-    const themeToggle = document.getElementById('themeToggle');
-    if (localStorage.getItem('dark') === 'true') {
-      document.body.classList.add('dark');
-      themeToggle.textContent = '☀️';
-    }
-    themeToggle.addEventListener('click', () => {
-      document.body.classList.toggle('dark');
-      const isDark = document.body.classList.contains('dark');
-      localStorage.setItem('dark', isDark);
-      themeToggle.textContent = isDark ? '☀️' : '🌙';
-    });
-
-    // Uptime Counter
-    const serverUptimeSeconds = ${stats.uptime_seconds || 0};
-    function formatUptime(totalSeconds) {
-        const days = Math.floor(totalSeconds / (24 * 3600));
-        const hours = Math.floor((totalSeconds % (24 * 3600)) / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        return \`\${days}d \${hours}h \${minutes}m\`;
-    }
-    let currentUptime = serverUptimeSeconds;
-    const uptimeElement = document.getElementById('uptime-counter');
-    if (uptimeElement) {
-        uptimeElement.textContent = formatUptime(currentUptime);
-        setInterval(() => {
-            currentUptime += 60; // Increment by a minute
-            uptimeElement.textContent = formatUptime(currentUptime);
-        }, 60000); // Update every minute
-    }
-
-    // Test Proxy Form
-    const form = document.getElementById('testForm');
-    const proxyInput = document.getElementById('proxyInput');
-    const resultDiv = document.getElementById('result');
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const proxy = proxyInput.value.trim();
-      if (!proxy) return;
-      resultDiv.innerHTML = '⏳ Testing...';
-      resultDiv.style.display = 'block';
-      try {
-        const res = await fetch('/test?proxy=' + encodeURIComponent(proxy));
-        const data = await res.json();
-        if (data.success) {
-          resultDiv.innerHTML = \`✅ <span class="success">UP</span>\\nProxy: \${data.proxy}\\nLatency: \${data.latency_ms}ms\\nAttempt: \${data.attempt}\`;
-        } else {
-          resultDiv.innerHTML = \`❌ <span class="error">DOWN</span>\\nProxy: \${data.proxy}\\nError: \${data.error}\\nAttempt: \${data.attempt}\`;
+    function initializeDashboard() {
+        // Dark Mode Toggle
+        const themeToggle = document.getElementById('themeToggle');
+        if (localStorage.getItem('dark') === 'true') {
+            document.body.classList.add('dark');
+            themeToggle.textContent = '☀️';
         }
-      } catch (error) {
-        resultDiv.innerHTML = '❌ <span class="error">Request failed</span>';
-      }
-    });
-
-    // Registration Form
-    const registerForm = document.getElementById('registerForm');
-    const registrationResultDiv = document.getElementById('registrationResult');
-    registerForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      registrationResultDiv.style.display = 'block';
-      registrationResultDiv.innerHTML = '⏳ Registering...';
-
-      const body = {
-        cf_api_token: document.getElementById('apiTokenInput').value.trim(),
-        cf_account_id: document.getElementById('accountIdInput').value.trim(),
-        cf_zone_id: document.getElementById('zoneIdInput').value.trim() || undefined,
-        cf_worker_name: document.getElementById('workerNameInput').value.trim() || undefined,
-        error_threshold: parseInt(document.getElementById('errorThresholdInput').value, 10) || undefined,
-      };
-
-      try {
-        const res = await fetch('/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+        themeToggle.addEventListener('click', function() {
+            document.body.classList.toggle('dark');
+            const isDark = document.body.classList.contains('dark');
+            localStorage.setItem('dark', isDark);
+            themeToggle.textContent = isDark ? '☀️' : '🌙';
         });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          registrationResultDiv.innerHTML = \`✅ <span class="success">Registration successful!</span><br>Your Unique ID is: <strong>\${data.unique_id}</strong>\`;
-        } else {
-          registrationResultDiv.innerHTML = \`❌ <span class="error">Registration Failed:</span> \${data.error || 'Unknown error'}\`;
-        }
-      } catch (err) {
-        registrationResultDiv.innerHTML = \`❌ <span class="error">Request failed: \${err.message}</span>\`;
-      }
-    });
 
-    // View Stats by ID Form
-    const viewStatsForm = document.getElementById('viewStatsForm');
-    viewStatsForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const uniqueId = document.getElementById('uniqueIdInput').value.trim();
-      if (uniqueId) {
-        window.location.href = '/?id=' + uniqueId;
-      }
-    });
-
-    // Auto refresh
-    setTimeout(() => {
-        if (!window.location.search.includes('id=')) {
-            location.reload();
+        // Uptime Counter
+        const serverUptimeSeconds = parseInt(document.body.dataset.uptimeSeconds, 10) || 0;
+        function formatUptime(totalSeconds) {
+            const days = Math.floor(totalSeconds / (24 * 3600));
+            const hours = Math.floor((totalSeconds % (24 * 3600)) / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            return days + 'd ' + hours + 'h ' + minutes + 'm';
         }
-    }, 30000);
+        let currentUptime = serverUptimeSeconds;
+        const uptimeElement = document.getElementById('uptime-counter');
+        if (uptimeElement) {
+            uptimeElement.textContent = formatUptime(currentUptime);
+            setInterval(function() {
+                currentUptime += 60; // Increment by a minute
+                uptimeElement.textContent = formatUptime(currentUptime);
+            }, 60000);
+        }
+
+        // Test Proxy Form
+        const form = document.getElementById('testForm');
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const proxyInput = document.getElementById('proxyInput');
+            const resultDiv = document.getElementById('result');
+            const proxy = proxyInput.value.trim();
+            if (!proxy) return;
+            resultDiv.innerHTML = '⏳ Testing...';
+            resultDiv.style.display = 'block';
+            fetch('/test?proxy=' + encodeURIComponent(proxy))
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        resultDiv.innerHTML = '✅ <span class="success">UP</span>\\nProxy: ' + data.proxy + '\\nLatency: ' + data.latency_ms + 'ms\\nAttempt: ' + data.attempt;
+                    } else {
+                        resultDiv.innerHTML = '❌ <span class="error">DOWN</span>\\nProxy: ' + data.proxy + '\\nError: ' + data.error + '\\nAttempt: ' + data.attempt;
+                    }
+                })
+                .catch(function(error) {
+                    resultDiv.innerHTML = '❌ <span class="error">Request failed</span>';
+                });
+        });
+
+        // Registration Form
+        const registerForm = document.getElementById('registerForm');
+        registerForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const registrationResultDiv = document.getElementById('registrationResult');
+            registrationResultDiv.style.display = 'block';
+            registrationResultDiv.innerHTML = '⏳ Registering...';
+
+            const body = {
+                cf_api_token: document.getElementById('apiTokenInput').value.trim(),
+                cf_account_id: document.getElementById('accountIdInput').value.trim(),
+                cf_zone_id: document.getElementById('zoneIdInput').value.trim() || undefined,
+                cf_worker_name: document.getElementById('workerNameInput').value.trim() || undefined,
+                error_threshold: parseInt(document.getElementById('errorThresholdInput').value, 10) || undefined,
+            };
+
+            fetch('/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            })
+            .then(function(res) { return res.json().then(data => ({ ok: res.ok, data: data })); })
+            .then(function(response) {
+                if (response.ok && response.data.success) {
+                    registrationResultDiv.innerHTML = '✅ <span class="success">Registration successful!</span><br>Your Unique ID is: <strong>' + response.data.unique_id + '</strong>';
+                } else {
+                    registrationResultDiv.innerHTML = '❌ <span class="error">Registration Failed:</span> ' + (response.data.error || 'Unknown error');
+                }
+            })
+            .catch(function(err) {
+                registrationResultDiv.innerHTML = '❌ <span class="error">Request failed: ' + err.message + '</span>';
+            });
+        });
+
+        // View Stats by ID Form
+        const viewStatsForm = document.getElementById('viewStatsForm');
+        viewStatsForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const uniqueId = document.getElementById('uniqueIdInput').value.trim();
+            if (uniqueId) {
+                window.location.href = '/?id=' + uniqueId;
+            }
+        });
+
+        // Auto refresh
+        setTimeout(function() {
+            if (!window.location.search.includes('id=')) {
+                location.reload();
+            }
+        }, 30000);
+    }
+
+    document.addEventListener('DOMContentLoaded', initializeDashboard);
   </script>
 </body>
 </html>
