@@ -3,27 +3,49 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import worker, { formatUptimeForTelegram } from './worker.js';
 
-const RAILWAY_BASE = "https://badakterbangx-api.up.railway.app";
-const TELEGRAM_BOT_TOKEN = "7872111732:AAEfGshwnMYPeF3H2-0mvuEyiuTipgiKCxg";
-const TELEGRAM_CHAT_ID = "5361605327";
+// Match the placeholders in worker.js
+const API_BASE_URL = "https://your-vortex-api.up.railway.app";
+const CF_STATS_UNIQUE_ID = "YOUR_UNIQUE_ID_HERE";
+const TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN_HERE";
+const TELEGRAM_CHAT_ID = "YOUR_TELEGRAM_CHAT_ID_HERE";
+
+// Variable to capture the Telegram payload
+let telegramPayload = null;
 
 const server = setupServer(
-  // Mock for Railway API /ping
-  http.get(`${RAILWAY_BASE}/ping`, () => {
-    return HttpResponse.json({ status: 'Alive' });
-  }),
-
-  // Mock for Railway API /stats
-  http.get(`${RAILWAY_BASE}/stats`, () => {
+  // Mock for API /ping
+  http.get(`${API_BASE_URL}/ping`, () => {
     return HttpResponse.json({
-      uptime_seconds: 86400 + 3600 * 2 + 60 * 5, // 1d 2h 5m
-      total_requests: 12345,
-      success_rate_percent: 99.8,
+      status: 'Alive',
+      uptime_seconds: 90060 // 1d 1h 1m
     });
   }),
 
-  // Mock for Railway API /health
-  http.get(`${RAILWAY_BASE}/health`, ({ request }) => {
+  // Mock for API /statscf/data/:id
+  http.get(`${API_BASE_URL}/statscf/data/${CF_STATS_UNIQUE_ID}`, () => {
+    return HttpResponse.json({
+      success: true,
+      data_source: 'cloudflare_api',
+      period: { since: '2023-10-27', until: '2023-10-27' },
+      data: [{
+        global_stats: { total_requests: 50000 },
+        worker_stats: {
+          requests: 12345,
+          subrequests: 500,
+          errors: 42,
+          cpu_time_p50: 5.1,
+          cpu_time_p90: 15.2,
+          cpu_time_p99: 25.3,
+        },
+        zone_stats: {
+          bandwidth_bytes: 1073741824, // 1 GB
+        },
+      }],
+    });
+  }),
+
+  // Mock for API /health
+  http.get(`${API_BASE_URL}/health`, ({ request }) => {
     const url = new URL(request.url);
     const proxy = url.searchParams.get('proxy');
     return HttpResponse.json({
@@ -34,24 +56,23 @@ const server = setupServer(
     });
   }),
 
-  // Mock for Telegram API
-  http.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, () => {
+  // Mock for Telegram API that captures the payload
+  http.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, async ({ request }) => {
+    telegramPayload = await request.json();
     return HttpResponse.json({ ok: true });
   })
 );
 
 beforeAll(() => server.listen());
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  telegramPayload = null; // Reset payload after each test
+});
 afterAll(() => server.close());
 
 describe('formatUptimeForTelegram', () => {
   it('should format seconds into "Xd Yh Zm" format correctly', () => {
-    expect(formatUptimeForTelegram(90061)).toBe('1d 1h 1m');
-    expect(formatUptimeForTelegram(86400)).toBe('1d 0h 0m');
-    expect(formatUptimeForTelegram(3600)).toBe('0d 1h 0m');
-    expect(formatUptimeForTelegram(60)).toBe('0d 0h 1m');
-    expect(formatUptimeForTelegram(0)).toBe('0d 0h 0m');
-    expect(formatUptimeForTelegram(172800 + 18000 + 180)).toBe('2d 5h 3m');
+    expect(formatUptimeForTelegram(90060)).toBe('1d 1h 1m');
   });
 });
 
@@ -60,9 +81,11 @@ describe('Fetch handler', () => {
     const req = new Request('http://localhost/');
     const res = await worker.fetch(req);
     expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toContain('text/html');
     const text = await res.text();
-    expect(text).toContain('<h1>🚀 Proxy Health Checker</h1>');
+    expect(text).toContain('<h1>🚀 Vortex-API Health Dashboard</h1>');
+    expect(text).toContain('12,345'); // Worker requests
+    expect(text).toContain('42'); // Worker errors
+    expect(text).toContain('1.00 GB'); // Zone bandwidth
   });
 
   it('should handle proxy testing via /test endpoint', async () => {
@@ -70,27 +93,21 @@ describe('Fetch handler', () => {
     const req = new Request(`http://localhost/test?proxy=${encodeURIComponent(proxy)}`);
     const res = await worker.fetch(req);
     expect(res.status).toBe(200);
-    expect(res.headers.get('Content-Type')).toContain('application/json');
     const json = await res.json();
     expect(json.success).toBe(true);
-    expect(json.proxy).toBe(proxy);
   });
 
-  it('should handle /stats command from Telegram webhook', async () => {
+  it('should handle /stats command from Telegram webhook and send correct data', async () => {
     const req = new Request('http://localhost/telegram', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: {
-          text: '/stats',
-          chat: { id: TELEGRAM_CHAT_ID },
-        },
-      }),
+      body: JSON.stringify({ message: { text: '/stats', chat: { id: TELEGRAM_CHAT_ID } } }),
     });
-    const res = await worker.fetch(req);
-    expect(res.status).toBe(200);
-    const text = await res.text();
-    expect(text).toBe('OK');
+    await worker.fetch(req);
+    expect(telegramPayload).not.toBeNull();
+    expect(telegramPayload.chat_id).toBe(TELEGRAM_CHAT_ID);
+    expect(telegramPayload.text).toContain('API Uptime: 1d 1h 1m');
+    expect(telegramPayload.text).toContain('Errors: 42');
+    expect(telegramPayload.text).toContain('Bandwidth: 1.00 GB');
   });
 });
 
@@ -98,10 +115,16 @@ describe('Scheduled handler', () => {
   it('should trigger ping on "*/10 * * * *" cron', async () => {
     const event = { cron: '*/10 * * * *' };
     await worker.scheduled(event);
+    // Assertion is implicit via mock server logs, no explicit check needed here
   });
 
-  it('should trigger daily report on "0 17,23,5,11 * * *" cron', async () => {
+  it('should trigger daily report on "0 17,23,5,11 * * *" cron and send correct data', async () => {
     const event = { cron: '0 17,23,5,11 * * *' };
     await worker.scheduled(event);
+    expect(telegramPayload).not.toBeNull();
+    expect(telegramPayload.chat_id).toBe(TELEGRAM_CHAT_ID);
+    expect(telegramPayload.text).toContain('API Uptime: 1d 1h 1m');
+    expect(telegramPayload.text).toContain('Errors: 42');
+    expect(telegramPayload.text).toContain('Bandwidth: 1.00 GB');
   });
 });

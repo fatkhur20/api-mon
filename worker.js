@@ -1,8 +1,9 @@
-// worker.js — versi FINAL: cron terpisah + ping 10 menit + laporan 4x sehari WIB + status dari /ping + uptime format Xd Yh Zm
+// worker.js — Integrated with Vortex-API backend
 
-const RAILWAY_BASE = "https://badakterbangx-api.up.railway.app"; // ✅ WAJIB https://
-const TELEGRAM_BOT_TOKEN = "7872111732:AAEfGshwnMYPeF3H2-0mvuEyiuTipgiKCxg";      // 👈 GANTI
-const TELEGRAM_CHAT_ID = "5361605327";                   // 👈 GANTI
+const API_BASE_URL = "https://your-vortex-api.up.railway.app"; // 👈 GANTI DENGAN URL API ANDA
+const CF_STATS_UNIQUE_ID = "YOUR_UNIQUE_ID_HERE"; // 👈 GANTI DENGAN ID UNIK ANDA
+const TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN_HERE"; // 👈 GANTI
+const TELEGRAM_CHAT_ID = "YOUR_TELEGRAM_CHAT_ID_HERE"; // 👈 GANTI
 
 export default {
   // 👇 Handle HTTP: dashboard + Telegram webhook
@@ -29,6 +30,8 @@ export default {
 
     // 👇 Tampilkan dashboard
     const stats = await fetchStats();
+    const workerStats = stats.worker_stats || {};
+    const zoneStats = stats.zone_stats || {};
 
     const html = `
 <!DOCTYPE html>
@@ -36,18 +39,20 @@ export default {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🚀 Proxy Health Dashboard</title>
+  <title>🚀 Vortex-API Health Dashboard</title>
   <style>
-    :root { --bg: #ffffff; --text: #2c3e50; --card: #f8f9fa; --shadow: rgba(0,0,0,0.1); }
-    .dark { --bg: #121212; --text: #f5f5f5; --card: #1e1e1e; --shadow: rgba(0,0,0,0.3); }
+    :root { --bg: #ffffff; --text: #2c3e50; --card: #f8f9fa; --shadow: rgba(0,0,0,0.1); --error-text: #dc3545; }
+    .dark { --bg: #121212; --text: #f5f5f5; --card: #1e1e1e; --shadow: rgba(0,0,0,0.3); --error-text: #ff8a80; }
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; background: var(--bg); color: var(--text); transition: background 0.3s; }
-    .container { max-width: 700px; margin: 20px auto; padding: 30px; background: var(--card); border-radius: 16px; box-shadow: 0 8px 20px var(--shadow); }
+    .container { max-width: 800px; margin: 20px auto; padding: 30px; background: var(--card); border-radius: 16px; box-shadow: 0 8px 20px var(--shadow); }
     h1 { text-align: center; margin-bottom: 30px; color: var(--text); }
-    .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 30px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 30px; }
     .stat { background: var(--bg); padding: 24px; border-radius: 12px; text-align: center; box-shadow: 0 4px 8px var(--shadow); transition: transform 0.2s; }
     .stat:hover { transform: translateY(-4px); }
+    .stat-title { font-size: 16px; color: var(--text); opacity: 0.8; margin-bottom: 8px; }
     .stat-value { font-size: 28px; font-weight: bold; color: #007bff; }
-    .status-dot { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: #dc3545; }
+    .stat-value.error { color: var(--error-text); }
+    .status-dot { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: #dc3545; vertical-align: middle; margin-left: 8px; }
     .status-dot.up { background: #28a745; }
     form { text-align: center; margin: 30px 0; }
     input { padding: 14px; width: 300px; border: 2px solid #ddd; border-radius: 12px; font-size: 16px; background: var(--bg); color: var(--text); }
@@ -57,7 +62,6 @@ export default {
     #result { margin-top: 24px; padding: 24px; background: var(--bg); border-radius: 12px; display: none; font-family: monospace; white-space: pre-wrap; border: 1px solid #ddd; }
     .dark #result { border-color: #444; }
     .success { color: #28a745; }
-    .error { color: #dc3545; }
     .footer { text-align: center; margin-top: 40px; font-size: 14px; color: var(--text); }
     #themeToggle { position: fixed; top: 20px; right: 20px; background: var(--card); border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; cursor: pointer; box-shadow: 0 2px 8px var(--shadow); }
   </style>
@@ -65,26 +69,32 @@ export default {
 <body>
   <button id="themeToggle">🌙</button>
   <div class="container">
-    <h1>🚀 Proxy Health Checker</h1>
+    <h1>🚀 Vortex-API Health Dashboard</h1>
 
-    <div class="stats">
+    <div class="stats-grid">
       <div class="stat">
-        <div>Total Requests</div>
-        <div class="stat-value">${stats.total_requests?.toLocaleString() || 0}</div>
+        <div class="stat-title">API Status</div>
+        <div class="stat-value">${stats.service}<span class="status-dot ${stats.service === "Online" ? "up" : ""}"></span></div>
       </div>
       <div class="stat">
-        <div>Success Rate</div>
-        <div class="stat-value">${stats.success_rate_percent || 0}%</div>
+        <div class="stat-title">API Uptime</div>
+        <div class="stat-value" id="uptime-counter">0d 0h 0m</div>
+      </div>
+       <div class="stat">
+        <div class="stat-title">Worker Requests</div>
+        <div class="stat-value">${workerStats.requests?.toLocaleString() || 'N/A'}</div>
       </div>
       <div class="stat">
-        <div>Uptime</div>
-        <div class="stat-value" id="uptime-counter">00:00:00:00</div>
+        <div class="stat-title">Worker Errors</div>
+        <div class="stat-value error">${workerStats.errors?.toLocaleString() || 'N/A'}</div>
       </div>
       <div class="stat">
-        <div>Status</div>
-        <div class="stat-value">
-          <span class="status-dot ${stats.service !== "Offline" ? "up" : ""}"></span>
-        </div>
+        <div class="stat-title">CPU Time (p90)</div>
+        <div class="stat-value">${workerStats.cpu_time_p90?.toFixed(2) || 'N/A'} ms</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Zone Bandwidth (Today)</div>
+        <div class="stat-value">${formatBytes(zoneStats.bandwidth_bytes)}</div>
       </div>
     </div>
 
@@ -96,7 +106,7 @@ export default {
     <div id="result"></div>
 
     <div class="footer">
-      Cron terakhir: <span id="lastCron">belum ada</span>
+      Data provided by Vortex-API. Auto-refresh in 30s.
     </div>
   </div>
 
@@ -117,24 +127,20 @@ export default {
     // Uptime Counter
     const serverUptimeSeconds = ${stats.uptime_seconds || 0};
     function formatUptime(totalSeconds) {
-      const days = Math.floor(totalSeconds / (24 * 3600));
-      const hours = Math.floor((totalSeconds % (24 * 3600)) / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      const seconds = totalSeconds % 60;
-      return [
-        days.toString().padStart(2, '0'),
-        hours.toString().padStart(2, '0'),
-        minutes.toString().padStart(2, '0'),
-        seconds.toString().padStart(2, '0')
-      ].join(':');
+        const days = Math.floor(totalSeconds / (24 * 3600));
+        const hours = Math.floor((totalSeconds % (24 * 3600)) / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        return \`\${days}d \${hours}h \${minutes}m\`;
     }
     let currentUptime = serverUptimeSeconds;
     const uptimeElement = document.getElementById('uptime-counter');
-    uptimeElement.textContent = formatUptime(currentUptime);
-    setInterval(() => {
-      currentUptime++;
-      uptimeElement.textContent = formatUptime(currentUptime);
-    }, 1000);
+    if (uptimeElement) {
+        uptimeElement.textContent = formatUptime(currentUptime);
+        setInterval(() => {
+            currentUptime += 60; // Increment by a minute
+            uptimeElement.textContent = formatUptime(currentUptime);
+        }, 60000); // Update every minute
+    }
 
     // Test Proxy Form
     const form = document.getElementById('testForm');
@@ -159,7 +165,7 @@ export default {
       }
     });
 
-    // Auto refresh (diam-diam, tanpa ditampilkan ke user)
+    // Auto refresh
     setTimeout(() => location.reload(), 30000);
   </script>
 </body>
@@ -176,14 +182,24 @@ export default {
     console.log(`[CRON] Triggered: ${event.cron} at ${new Date().toISOString()}`);
 
     if (event.cron === "*/10 * * * *") {
-      // ✅ Ping Railway tiap 10 menit
-      await pingRailway();
+      // ✅ Ping API tiap 10 menit
+      await pingApi();
     } else if (event.cron === "0 17,23,5,11 * * *") {
       // ✅ Kirim laporan 4x sehari (00, 06, 12, 18 WIB)
       await sendDailyReport();
     }
   },
 };
+
+// ✅ Fungsi: format bytes
+function formatBytes(bytes, decimals = 2) {
+    if (!+bytes || bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(dm)} ${sizes[i]}`;
+}
 
 // ✅ Fungsi: format uptime untuk Telegram → "Xd Yh Zm"
 export function formatUptimeForTelegram(totalSeconds) {
@@ -193,44 +209,54 @@ export function formatUptimeForTelegram(totalSeconds) {
   return `${days}d ${hours}h ${minutes}m`;
 }
 
-// ✅ Fungsi: ping Railway tiap 10 menit — pakai /ping (ringan)
-async function pingRailway() {
+// ✅ Fungsi: ping API tiap 10 menit — pakai /ping (ringan)
+async function pingApi() {
   try {
     const now = new Date();
-    const response = await fetch(`${RAILWAY_BASE}/ping`);
+    const response = await fetch(`${API_BASE_URL}/ping`);
     if (response.ok) {
-      console.log(`✅ [PING] Railway tetap hidup via /ping - ${now.toISOString()}`);
+      console.log(`✅ [PING] API tetap hidup via /ping - ${now.toISOString()}`);
     } else {
-      console.warn(`⚠️ [PING] Railway merespons tapi tidak OK: ${response.status}`);
+      console.warn(`⚠️ [PING] API merespons tapi tidak OK: ${response.status}`);
     }
   } catch (error) {
-    console.error("❌ [PING] Gagal ping Railway:", error.message);
+    console.error("❌ [PING] Gagal ping API:", error.message);
   }
 }
 
-// ✅ Fungsi: kirim laporan otomatis 4x sehari — uptime format Xd Yh Zm
+// ✅ Fungsi: kirim laporan otomatis 4x sehari
 async function sendDailyReport() {
   try {
     const stats = await fetchStats();
     const now = new Date();
     const wibTime = now.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
-    let statusEmoji = "🔴";
-    if (stats.service !== "Offline") statusEmoji = "🟢";
+    const statusEmoji = stats.service === "Online" ? "🟢" : "🔴";
+    const workerStats = stats.worker_stats || {};
+    const zoneStats = stats.zone_stats || {};
+
+    const workerPart = workerStats.requests !== undefined ? `
+*Worker Stats*
+- Invokes: ${workerStats.requests?.toLocaleString() || 'N/A'}
+- Errors: ${workerStats.errors?.toLocaleString() || 'N/A'}
+- CPU p90: ${workerStats.cpu_time_p90?.toFixed(2) || 'N/A'} ms
+` : '';
+
+    const zonePart = zoneStats.bandwidth_bytes !== undefined ? `
+*Zone Stats*
+- Bandwidth: ${formatBytes(zoneStats.bandwidth_bytes)}
+` : '';
 
     const message = `
-📊 *LAPORAN PROXY HEALTH (WIB)*
+📊 *Vortex-API Daily Report (WIB)*
 ⏰ Waktu: ${wibTime}
-${statusEmoji} Status: ${stats.service}
-⏳ Uptime: ${formatUptimeForTelegram(stats.uptime_seconds)}
-📈 Total Request: ${stats.total_requests?.toLocaleString()}
-✅ Success Rate: ${stats.success_rate_percent}%
-⏱️ Trigger UTC: ${now.toISOString()}
+${statusEmoji} API Status: *${stats.service}*
+⏳ API Uptime: ${formatUptimeForTelegram(stats.uptime_seconds)}
+${workerPart}
+${zonePart}
+_Laporan otomatis via Cloudflare Worker_
+    `.trim().replace(/\n\n+/g, '\n');
 
-_Dikirim otomatis oleh Cloudflare Worker_
-    `.trim();
-
-    // ✅ PERBAIKAN KRITIS — hapus spasi setelah /bot
     const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
 
     const tgRes = await fetch(telegramUrl, {
@@ -246,33 +272,49 @@ _Dikirim otomatis oleh Cloudflare Worker_
     if (tgRes.ok) {
       console.log("✅ [REPORT] Laporan dikirim ke Telegram - " + now.toISOString());
     } else {
-      console.warn("⚠️ [REPORT] Gagal kirim laporan:", await tgRes.text());
+      const errorText = await tgRes.text();
+      console.warn(`⚠️ [REPORT] Gagal kirim laporan: ${errorText}`);
     }
   } catch (error) {
     console.error("❌ [REPORT] Error kirim laporan:", error.message);
   }
 }
 
-// ✅ Fungsi: handle /stats command dari Telegram — uptime format Xd Yh Zm
+// ✅ Fungsi: handle /stats command dari Telegram
 async function handleStatsCommand(chatId) {
   try {
     const stats = await fetchStats();
     const now = new Date();
     const wibTime = now.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
-    let statusEmoji = "🔴";
-    if (stats.service !== "Offline") statusEmoji = "🟢";
+    const statusEmoji = stats.service === "Online" ? "🟢" : "🔴";
+    const workerStats = stats.worker_stats || {};
+    const zoneStats = stats.zone_stats || {};
+
+    const workerPart = workerStats.requests !== undefined ? `
+*Worker Stats*
+- Invokes: ${workerStats.requests?.toLocaleString() || 'N/A'}
+- Subrequests: ${workerStats.subrequests?.toLocaleString() || 'N/A'}
+- Errors: ${workerStats.errors?.toLocaleString() || 'N/A'}
+- CPU p50: ${workerStats.cpu_time_p50?.toFixed(2) || 'N/A'} ms
+- CPU p90: ${workerStats.cpu_time_p90?.toFixed(2) || 'N/A'} ms
+- CPU p99: ${workerStats.cpu_time_p99?.toFixed(2) || 'N/A'} ms
+` : '';
+
+    const zonePart = zoneStats.bandwidth_bytes !== undefined ? `
+*Zone Stats*
+- Bandwidth: ${formatBytes(zoneStats.bandwidth_bytes)}
+` : '';
 
     const message = `
-🤖 *STATS MANUAL REQUEST*
-📅 Requested at: ${wibTime}
-${statusEmoji} Status: ${stats.service}
-⏳ Uptime: ${formatUptimeForTelegram(stats.uptime_seconds)}
-📈 Total Request: ${stats.total_requests?.toLocaleString()}
-✅ Success Rate: ${stats.success_rate_percent}%
-
-_Manual request via /stats_
-    `.trim();
+🤖 *Manual Stats Request (WIB)*
+📅 Waktu: ${wibTime}
+${statusEmoji} API Status: *${stats.service}*
+⏳ API Uptime: ${formatUptimeForTelegram(stats.uptime_seconds)}
+${workerPart}
+${zonePart}
+_Request manual via /stats_
+    `.trim().replace(/\n\n+/g, '\n');
 
     const telegramUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     await fetch(telegramUrl, {
@@ -289,34 +331,49 @@ _Manual request via /stats_
   }
 }
 
-// ✅ Fungsi utama: gabung data dari /ping (status) + /stats (angka)
+// ✅ Fungsi utama: Ambil statistik dari backend Vortex-API
 async function fetchStats() {
   try {
-    // Ambil status dari /ping — lebih ringan & akurat
-    const pingRes = await fetch(`${RAILWAY_BASE}/ping`);
-    const pingData = pingRes.ok ? await pingRes.json() : null;
+    // 1. Cek status layanan dengan endpoint /ping
+    const pingRes = await fetch(`${API_BASE_URL}/ping`);
+    if (!pingRes.ok) {
+      // Jika ping gagal, anggap layanan offline
+      return { service: "Offline", uptime_seconds: 0, worker_stats: null, zone_stats: null };
+    }
+    const pingData = await pingRes.json();
 
-    // Ambil statistik angka dari /stats
-    const statsRes = await fetch(`${RAILWAY_BASE}/stats`);
-    const statsData = statsRes.ok ? await statsRes.json() : {};
+    // 2. Ambil statistik detail dari endpoint /statscf
+    const statsRes = await fetch(`${API_BASE_URL}/statscf/data/${CF_STATS_UNIQUE_ID}`);
+    if (!statsRes.ok) {
+      // Jika stats gagal tapi ping berhasil, layanan online tapi ada masalah data
+      return { service: "Online (Data Error)", uptime_seconds: pingData.uptime_seconds || 0, worker_stats: null, zone_stats: null };
+    }
+    const statsData = await statsRes.json();
 
-    // Gabungkan: status dari /ping, statistik dari /stats
+    // 3. Ekstrak data yang relevan dari respons API
+    const cfData = statsData.success && statsData.data && statsData.data[0] ? statsData.data[0] : {};
+    const workerStats = cfData.worker_stats || {};
+    const zoneStats = cfData.zone_stats || {};
+
+    // 4. Gabungkan semua data menjadi satu objek
     return {
-      service: pingData?.status === 'Alive' ? 'Online' : 'Offline',
-      uptime_seconds: statsData.uptime_seconds || 0,
-      total_requests: statsData.total_requests || 0,
-      success_rate_percent: statsData.success_rate_percent || 0,
+      service: "Online",
+      uptime_seconds: pingData.uptime_seconds || 0,
+      worker_stats: workerStats,
+      zone_stats: zoneStats,
     };
+
   } catch (e) {
     console.error("Gagal ambil stats:", e.message);
-    return { service: "Offline", uptime_seconds: 0, total_requests: 0, success_rate_percent: 0 };
+    // Jika ada error network, anggap layanan offline
+    return { service: "Offline", uptime_seconds: 0, worker_stats: null, zone_stats: null };
   }
 }
 
 // ✅ Fungsi bantu: test proxy
 async function fetchHealth(proxy) {
   try {
-    const res = await fetch(`${RAILWAY_BASE}/health?proxy=${encodeURIComponent(proxy)}&retries=2`);
+    const res = await fetch(`${API_BASE_URL}/health?proxy=${encodeURIComponent(proxy)}&retries=2`);
     if (res.ok) return await res.json();
   } catch (e) {
     console.error("Gagal test proxy:", e.message);
